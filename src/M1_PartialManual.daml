@@ -1,0 +1,80 @@
+module M1_PartialManual where
+
+import Coin
+import DA.Assert
+import DA.Either
+
+
+-- | This is a role template that gives the owner
+-- the permission to create arbitrary coins provided
+-- the value is > 0 and <= 100.
+-- Since the coins are signed by both issuer
+-- and owner, contracts of this template are also
+-- signed by both
+template RoleCoin100
+  with
+    issuer : Party
+    owner : Party
+  where
+    signatory [issuer, owner]
+    -- | Create an individual coin.
+    -- Here we modified the choice to return
+    -- `Either Text (ContractId Coin)`.
+    -- If the value falls outside the range
+    -- we return `Left error`.
+    -- This means that we will never abort the
+    -- transaction.
+    nonconsuming choice CreateCoin : Either Text CoinId
+      with
+        value : Int
+      controller owner
+      do if not (value >= 1 && value <= 100)
+           then pure $ Left $
+                show value <> " must be between 1 and 100"
+           else do c <- create Coin with issuer, owner, value
+                   pure (Right c)
+    -- | Create a list of coins given a list of values.
+    -- This calls the `CreateCoin` choice internally.
+    nonconsuming choice CreateCoinBatch : ([Text], [CoinId])
+      with
+        vs : [Int]
+      controller owner
+      do rs <- forA vs $ \value ->
+           exercise self CreateCoin with value
+         -- partitionEithers will separate the
+         -- Lefts from the Rights.
+         pure (partitionEithers rs)
+
+-- | Standard proposal contract
+-- to create the actual multi-signatory role contract.
+template RoleProposal
+  with
+    issuer : Party
+    owner : Party
+  where
+    signatory issuer
+    observer owner
+    choice Accept : ContractId RoleCoin100
+      controller owner
+      do create RoleCoin100 with issuer, owner
+
+test = scenario do
+  issuer <- getParty "issuer"
+  owner <- getParty "owner"
+  roleProposal <- submit issuer $
+    create RoleProposal with issuer, owner
+  role <- submit owner $
+    exercise roleProposal Accept
+  -- Here all values are in the expected range so the batch
+  -- create succeeds.
+  let vsSuccessful = [23, 42, 64]
+  submit owner $
+    exercise role (CreateCoinBatch vsSuccessful)
+  -- Here the first value is out of range.
+  -- However, we will still create the
+  let vsFailing = [0, 23, 42, 64]
+  (errs, coins) <- submit owner $
+    exercise role (CreateCoinBatch vsFailing)
+  errs === ["0 must be between 1 and 100"]
+  length coins === 3
+  pure ()

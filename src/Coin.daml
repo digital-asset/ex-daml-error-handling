@@ -1,0 +1,19 @@
+module Coin where
+
+-- | This is the template we want to create in batches.
+-- It is signed by both the issuer and the owner
+-- and it has a value field so we do not have to create
+-- separate contracts for each coin.
+-- We ignore merging and splitting here.
+-- We will reuse this contract throughout the example.
+template Coin
+  with
+    issuer : Party
+    owner : Party
+    value : Int
+  where
+    signatory [issuer, owner]
+
+-- | Type synonym to make things a
+-- bit more concice throughout this tutorial.
+type CoinId = ContractId Coin

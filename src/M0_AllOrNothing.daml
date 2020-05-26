@@ -1,0 +1,70 @@
+module M0_AllOrNothing where
+
+import Coin
+
+-- | This is a role template that gives the owner
+-- the permission to create arbitrary coins provided
+-- the value is > 0 and <= 100.
+-- Since the coins are signed by both issuer
+-- and owner, contracts of this template are also
+-- signed by both
+template RoleCoin100
+  with
+    issuer : Party
+    owner : Party
+  where
+    signatory [issuer, owner]
+    -- | Create an individual coin.
+    -- Values that are outside the allowed range
+    -- will abort the transaction.
+    nonconsuming choice CreateCoin : CoinId
+      with
+        value : Int
+      controller owner
+      do assertMsg
+             (show value <> " must be between 1 and 100")
+             (value >= 1 && value <= 100)
+         create Coin with issuer, owner, value
+    -- | Create a list of coins given a list of values.
+    -- This calls the `CreateCoin` choice internally.
+    nonconsuming choice CreateCoinBatch : [CoinId]
+      with
+        vs : [Int]
+      controller owner
+      do forA vs (\value -> exercise self CreateCoin with value)
+
+-- | Standard proposal contract
+-- to create the actual multi-signatory role contract.
+template RoleProposal
+  with
+    issuer : Party
+    owner : Party
+  where
+    signatory issuer
+    observer owner
+    choice Accept : ContractId RoleCoin100
+      controller owner
+      do create RoleCoin100 with issuer, owner
+
+test = scenario do
+  issuer <- getParty "issuer"
+  owner <- getParty "owner"
+  roleProposal <- submit issuer $
+    create RoleProposal with issuer, owner
+  role <- submit owner $
+    exercise roleProposal Accept
+  -- Here all values are in the expected range so the batch
+  -- create succeeds.
+  let vsSuccessful = [23, 42, 64]
+  submit owner $
+    exercise role (CreateCoinBatch vsSuccessful)
+  -- Here the first value is out of range so the whole
+  -- transaction is aborted and nothing gets created.
+  -- Our goal for the rest of this tutorial is
+  -- to modify the batch transaction such that
+  -- it will still create the Coin contracts with valid
+  -- values
+  let vsFailing = [0, 23, 42, 64]
+  submitMustFail owner $
+    exercise role (CreateCoinBatch vsFailing)
+  pure ()

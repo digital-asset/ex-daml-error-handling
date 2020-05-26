@@ -1,0 +1,42 @@
+module EitherT
+  ( EitherT(..)
+  , lift
+  ) where
+
+data EitherT e m a = EitherT with
+  runEitherT : m (Either e a)
+
+instance Functor m => Functor (EitherT e m) where
+  fmap f (EitherT a) = EitherT (fmap (fmap f) a)
+
+instance Action m => Applicative (EitherT e m) where
+  pure a = EitherT (pure (Right a))
+  EitherT f <*> EitherT v = EitherT $ do
+    mf <- f
+    case mf of
+      Left e -> pure (Left e)
+      Right f' -> do
+        mv <- v
+        case mv of
+          Left e -> pure (Left e)
+          Right v' -> pure (Right (f' v'))
+
+instance Action m => Action (EitherT e m) where
+  EitherT x >>= f = EitherT do
+    mx <- x
+    case mx of
+      Left e -> pure (Left e)
+      Right x -> runEitherT (f x)
+
+lift : Functor m => m a -> EitherT e m a
+lift a = EitherT (fmap Right a)
+
+-- | Happy to rename this if anyone has better suggestions.
+hoistEither : Applicative m => Either e a -> EitherT e m a
+hoistEither e = EitherT (pure e)
+
+instance Action m => CanAbort (EitherT Text m) where
+  abort err = hoistEither (Left err)
+
+instance Action m => ActionFail (EitherT Text m) where
+  fail = abort

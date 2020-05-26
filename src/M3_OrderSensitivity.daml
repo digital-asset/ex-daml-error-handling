@@ -1,0 +1,44 @@
+module M3_OrderSensitivity where
+
+import DA.Assert
+import DA.Optional
+import EitherT
+
+template TKey
+  with
+    p : Party
+  where
+    signatory p
+    key p : Party
+    maintainer key
+
+template T
+  with
+    p : Party
+  where
+    signatory p
+    nonconsuming choice C : Either Text (ContractId TKey)
+      controller p
+      do runEitherT $ do
+           c <- lift (create TKey with p)
+           assertMsg "please stop" False
+           pure c
+
+test = scenario do
+  p <- getParty "p"
+  c <- submit p (create T with p)
+  r <- submit p (lookupByKey @TKey p)
+  r === None
+  r <- submit p (exercise c C)
+  r === Left "please stop"
+  -- EitherT only short circuits, it does not abort
+  -- and rollback the whole transaction. So
+  -- anything that happened before you got to a
+  -- Left still takes effect which in this
+  -- example means that the TKey contract
+  -- is still created. Take a look at the README.md
+  -- for details on how you can structure your models
+  -- to avoid this.
+  r <- submit p (lookupByKey @TKey p)
+  assert (isSome r)
+  pure ()
